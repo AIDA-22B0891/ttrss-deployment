@@ -1,0 +1,9 @@
+[Unit]
+Description=TT-RSS Updater
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec ttrss_app php /var/www/update.php --daemon
+User=root
