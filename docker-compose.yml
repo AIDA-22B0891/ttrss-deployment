@@ -1,0 +1,35 @@
+version: '3'
+
+services:
+  db:
+    image: postgres:13-alpine
+    container_name: ttrss_db
+    environment:
+      - POSTGRES_USER=ttrss
+      - POSTGRES_PASSWORD=ttrss_password
+      - POSTGRES_DB=ttrss
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  ttrss:
+    image: wangqiru/ttrss:latest
+    container_name: ttrss_app
+    ports:
+      - "8280:80"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=ttrss
+      - DB_USER=ttrss
+      - DB_PASS=ttrss_password
+      - SELF_URL_PATH=http://194.87.118.106/
+    volumes:
+      - feed-icons:/var/www/feed-icons
+    depends_on:
+      - db
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  feed-icons:
