@@ -48,6 +48,8 @@ server {
 }
 ```
 
+Данный файл конфигурации можно найти по имени nginx-config
+
 ## ✅ 1.2. Развернуть базу данных PostgreSQL
 
 1) Развернута PostgreSQL 13 в контейнере
@@ -95,6 +97,8 @@ Type=oneshot
 ExecStart=/usr/bin/docker exec ttrss_app php /var/www/update.php --daemon
 User=root
 ```
+
+Данные файлы конфигруации можно найти в репозитории ttrss-update/ttrss-update.service и ttrss-update/ttrss-update.timer соотвественно
 
 ## ✅ 1.4. Добавить и настроить RSS-источники
 
