@@ -1,0 +1,36 @@
+{
+  "method": "POST",
+  "endpoint": "http://194.87.118.106/api/",
+  "description": "Получение списка RSS-лент",
+  "request": {
+    "op": "getFeeds",
+    "sid": "ваш_токен",
+    "cat_id": -3,
+    "unread_only": false,
+    "limit": 50,
+    "offset": 0,
+    "include_nested": false
+  },
+  "response_example": {
+    "seq": 0,
+    "status": 0,
+    "content": [
+      {
+        "feed_url": "https://habr.com/ru/rss/all/all/",
+        "title": "Все публикации подряд на Хабре",
+        "id": 5,
+        "unread": 110,
+        "has_icon": false,
+        "cat_id": 0
+      },
+      {
+        "feed_url": "https://www.opennet.ru/opennews/opennews_all.rss",
+        "title": "OpenNet: Все новости",
+        "id": 6,
+        "unread": 15,
+        "has_icon": false,
+        "cat_id": 0
+      }
+    ]
+  }
+}
