@@ -1,0 +1,18 @@
+{
+  "method": "POST",
+  "endpoint": "http://194.87.118.106/api/",
+  "description": "Аутентификация пользователя",
+  "request": {
+    "op": "login",
+    "user": "admin",
+    "password": "password"
+  },
+  "response_success": {
+    "seq": 0,
+    "status": 0,
+    "content": {
+      "session_id": "ваш_токен",
+      "api_level": 18
+    }
+  }
+}
