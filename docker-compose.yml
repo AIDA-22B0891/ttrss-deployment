@@ -29,6 +29,21 @@ services:
     depends_on:
       - db
     restart: unless-stopped
+  mcp:
+    build: ./mcp
+    container_name: ttrss_mcp
+    environment:
+      - MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*,194.87.118.106:*
+      - MCP_ALLOWED_ORIGINS=http://194.87.118.106:*,https://194.87.118.106:*
+      - TTRSS_API_URL=http://ttrss/api/
+      - TTRSS_USER=admin
+      - TTRSS_PASSWORD=password
+      - LOG_LEVEL=INFO
+    depends_on:
+      - ttrss
+    ports:
+      - "9100:8000"
+    restart: unless-stopped
 
 volumes:
   postgres_data:
