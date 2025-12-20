@@ -1,0 +1,763 @@
+---
+title: "News Analytics Dashboard"
+format: dashboard
+runtime: shiny
+---
+
+# Commands to run:
+# quarto preview dashboard.qmd
+
+```{r setup, include=FALSE}
+library(DBI)
+library(RPostgres)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(plotly)
+library(DT)
+library(glue)
+library(shiny)
+library(bslib)
+
+# Function to establish database connection
+get_env_required <- function(name) {
+  v <- Sys.getenv(name, unset = "")
+  if (!nzchar(v)) stop(sprintf("Missing required env var: %s", name), call. = FALSE)
+  v
+}
+
+get_con <- function() {
+  host <- get_env_required("DB_HOST")
+  port <- as.integer(get_env_required("DB_PORT"))
+  db   <- get_env_required("DB_NAME")
+  user <- get_env_required("DB_USER")
+  pass <- get_env_required("DB_PASS")
+  sslm <- Sys.getenv("PGSSLMODE", unset = "prefer")
+
+  message(sprintf("Connecting to Postgres: host=%s port=%s db=%s user=%s sslmode=%s",
+                  host, port, db, user, sslm))
+
+  DBI::dbConnect(
+    RPostgres::Postgres(),
+    host = host,
+    port = port,
+    dbname = db,
+    user = user,
+    password = pass,
+    sslmode = sslm
+  )
+}
+
+# Function to close connection safely
+close_con <- function(con) {
+  if(dbIsValid(con)) {
+    dbDisconnect(con)
+  }
+}
+
+# Define query functions
+q_kpi <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  # Build SQL query with parameters
+  sql <- "
+    SELECT 
+      COUNT(*) as total_news,
+      AVG(score) as avg_score,
+      MAX(published_at) as last_published
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- paste(sql, "AND category = ANY($3)")
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- paste(sql, "AND (score BETWEEN $4 AND $5 OR score IS NULL)")
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- paste(sql, "AND score BETWEEN $4 AND $5")
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- paste(sql, "AND title ILIKE $6")
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  result <- dbGetQuery(con, sql, params)
+  
+  # Get top category separately
+  sql_category <- "
+    SELECT category, COUNT(*) as cnt
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2"
+  
+  params_cat <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql_category <- paste(sql_category, "AND category = ANY($3)")
+    params_cat <- append(params_cat, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql_category <- paste(sql_category, "AND (score BETWEEN $4 AND $5 OR score IS NULL)")
+      params_cat <- append(params_cat, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql_category <- paste(sql_category, "AND score BETWEEN $4 AND $5")
+      params_cat <- append(params_cat, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql_category <- paste(sql_category, "AND title ILIKE $6")
+    params_cat <- append(params_cat, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  sql_category <- paste(sql_category, "GROUP BY category ORDER BY cnt DESC LIMIT 1")
+  
+  top_category_result <- dbGetQuery(con, sql_category, params_cat)
+  top_category <- ifelse(nrow(top_category_result) > 0, top_category_result$category[1], "")
+  
+  result$top_category <- top_category
+  
+  return(result)
+}
+
+q_timeseries <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  sql <- "
+    SELECT 
+      DATE(published_at) as day,
+      COUNT(*) as count
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2
+    GROUP BY DATE(published_at)
+    ORDER BY day"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- gsub("GROUP BY", "AND category = ANY($3) GROUP BY", sql)
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("GROUP BY", paste("AND (score BETWEEN $4 AND $5 OR score IS NULL) GROUP BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("GROUP BY", paste("AND score BETWEEN $4 AND $5 GROUP BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- gsub("GROUP BY", paste("AND title ILIKE $6 GROUP BY"), sql)
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  result <- dbGetQuery(con, sql, params)
+  return(result)
+}
+
+q_top_categories <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  sql <- "
+    SELECT 
+      category,
+      COUNT(*) as count
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2
+      AND category IS NOT NULL
+    GROUP BY category
+    ORDER BY count DESC
+    LIMIT 10"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- gsub("AND category IS NOT NULL", "AND category = ANY($3)", sql)
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("LIMIT", paste("AND (score BETWEEN $4 AND $5 OR score IS NULL) LIMIT"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("LIMIT", paste("AND score BETWEEN $4 AND $5 LIMIT"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- gsub("LIMIT", paste("AND title ILIKE $6 LIMIT"), sql)
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  result <- dbGetQuery(con, sql, params)
+  return(result)
+}
+
+q_avg_score_over_time <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  sql <- "
+    SELECT 
+      DATE(published_at) as day,
+      AVG(score) as avg_score
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2
+      AND score IS NOT NULL
+    GROUP BY DATE(published_at)
+    ORDER BY day"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- gsub("AND score IS NOT NULL", "AND category = ANY($3) AND score IS NOT NULL", sql)
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("ORDER BY", paste("AND (score BETWEEN $4 AND $5 OR score IS NULL) ORDER BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("ORDER BY", paste("AND score BETWEEN $4 AND $5 ORDER BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- gsub("ORDER BY", paste("AND title ILIKE $6 ORDER BY"), sql)
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  result <- dbGetQuery(con, sql, params)
+  return(result)
+}
+
+q_score_distribution <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  sql <- "
+    SELECT 
+      score,
+      COUNT(*) as count
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- paste(sql, "AND category = ANY($3)")
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- paste(sql, "AND (score BETWEEN $4 AND $5 OR score IS NULL)")
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- paste(sql, "AND score BETWEEN $4 AND $5")
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- paste(sql, "AND title ILIKE $6")
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  sql <- paste(sql, "GROUP BY score ORDER BY score")
+  
+  result <- dbGetQuery(con, sql, params)
+  return(result)
+}
+
+q_heatmap_data <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  sql <- "
+    SELECT 
+      DATE(published_at) as day,
+      category,
+      COUNT(*) as count
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2
+      AND category IS NOT NULL
+    GROUP BY DATE(published_at), category
+    ORDER BY day, category"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- gsub("AND category IS NOT NULL", "AND category = ANY($3)", sql)
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("GROUP BY", paste("AND (score BETWEEN $4 AND $5 OR score IS NULL) GROUP BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("GROUP BY", paste("AND score BETWEEN $4 AND $5 GROUP BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- gsub("GROUP BY", paste("AND title ILIKE $6 GROUP BY"), sql)
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  result <- dbGetQuery(con, sql, params)
+  return(result)
+}
+
+q_hourly_distribution <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  sql <- "
+    SELECT 
+      EXTRACT(HOUR FROM published_at) as hour,
+      COUNT(*) as count
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2
+    GROUP BY EXTRACT(HOUR FROM published_at)
+    ORDER BY hour"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- gsub("GROUP BY", "AND category = ANY($3) GROUP BY", sql)
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("GROUP BY", paste("AND (score BETWEEN $4 AND $5 OR score IS NULL) GROUP BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- gsub("GROUP BY", paste("AND score BETWEEN $4 AND $5 GROUP BY"), sql)
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- gsub("GROUP BY", paste("AND title ILIKE $6 GROUP BY"), sql)
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  result <- dbGetQuery(con, sql, params)
+  # Ensure all hours 0-23 are represented
+  all_hours <- data.frame(hour = 0:23)
+  result <- merge(all_hours, result, by = "hour", all.x = TRUE)
+  result$count[is.na(result$count)] <- 0
+  return(result)
+}
+
+q_top_news <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
+  sql <- "
+    SELECT 
+      published_at,
+      category,
+      score,
+      title,
+      link
+    FROM news_analysis
+    WHERE published_at >= $1 AND published_at < $2"
+  
+  params <- list(date_from, date_to)
+  
+  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
+    sql <- paste(sql, "AND category = ANY($3)")
+    params <- append(params, list(categories))
+  }
+  
+  if(include_null_score) {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- paste(sql, "AND (score BETWEEN $4 AND $5 OR score IS NULL)")
+      params <- append(params, list(score_min, score_max))
+    }
+  } else {
+    if(!is.null(score_min) && !is.null(score_max)) {
+      sql <- paste(sql, "AND score BETWEEN $4 AND $5")
+      params <- append(params, list(score_min, score_max))
+    }
+  }
+  
+  if(search_title != "") {
+    sql <- paste(sql, "AND title ILIKE $6")
+    params <- append(params, list(paste("%", search_title, "%", sep="")))
+  }
+  
+  sql <- paste(sql, "ORDER BY score DESC, published_at DESC LIMIT 200")
+  
+  result <- dbGetQuery(con, sql, params)
+  return(result)
+}
+
+# Initialize connection
+con <- get_con()
+
+# Close connection when Shiny session ends
+if(exists("session")) {
+  session$onSessionEnded(function() {
+    close_con(con)
+  })
+}
+```
+
+{{< sidebar}}
+
+### Filters
+
+```{r filters}
+# Reactive values for filters
+values <- reactiveValues()
+
+# Date range filter (default: last 30 days)
+current_date <- Sys.Date()
+default_start_date <- current_date - 30
+
+inputPanel(
+  dateRangeInput("date_range", 
+                 label = "Date Range:", 
+                 start = default_start_date,
+                 end = current_date,
+                 max = current_date),
+  
+  # Category filter (multi-select)
+  uiOutput("category_filter"),
+  
+  # Score range filter
+  sliderInput("score_range",
+              label = "Score Range:",
+              min = 0, max = 10, value = c(0, 10)),
+              
+  # Include NULL score checkbox
+  checkboxInput("include_null_score", 
+                label = "Include NULL score", 
+                value = TRUE),
+                
+  # Search title text input
+  textInput("search_title",
+            label = "Search in Title:",
+            value = "")
+)
+
+# Reactive to get unique categories
+observe({
+  req(input$date_range[1], input$date_range[2])
+  
+  sql_categories <- "
+    SELECT DISTINCT category 
+    FROM news_analysis
+    WHERE published_at >= $1 
+      AND published_at < $2 
+      AND category IS NOT NULL
+    ORDER BY category"
+  
+  categories_data <- dbGetQuery(con, sql_categories, 
+                                list(input$date_range[1], 
+                                     input$date_range[2] + 1))
+  
+  categories_list <- categories_data$category
+  
+  output$category_filter <- renderUI({
+    selectInput("categories", 
+                label = "Categories:",
+                choices = categories_list,
+                selected = categories_list,
+                multiple = TRUE)
+  })
+})
+```
+
+{{< /sidebar>}}
+
+
+## Charts
+
+This is a test text to verify that the dashboard is rendering.
+
+### Time Series: News Count by Day
+
+```{r time_series_chart}
+reactive_timeseries_data <- reactive({
+  req(input$date_range[1], input$date_range[2])
+  
+  date_from <- input$date_range[1]
+  date_to <- input$date_range[2] + 1
+  categories <- input$categories
+  include_null_score <- input$include_null_score
+  score_min <- input$score_range[1]
+  score_max <- input$score_range[2]
+  search_title <- input$search_title
+  
+  q_timeseries(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+})
+
+renderPlotly({
+  if(nrow(reactive_timeseries_data()) == 0) {
+    p <- ggplot() + 
+      annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+      theme_void()
+  } else {
+    p <- ggplot(reactive_timeseries_data(), aes(x = day, y = count)) +
+      geom_line(color = "steelblue", size = 1) +
+      geom_point(color = "steelblue", size = 2) +
+      labs(title = "News Count by Day", x = "Date", y = "Count") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  }
+  
+  ggplotly(p)
+})
+```
+
+### Top Categories
+
+```{r top_categories_chart}
+reactive_top_categories_data <- reactive({
+  req(input$date_range[1], input$date_range[2])
+  
+  date_from <- input$date_range[1]
+  date_to <- input$date_range[2] + 1
+  categories <- input$categories
+  include_null_score <- input$include_null_score
+  score_min <- input$score_range[1]
+  score_max <- input$score_range[2]
+  search_title <- input$search_title
+  
+  q_top_categories(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+})
+
+renderPlotly({
+  if(nrow(reactive_top_categories_data()) == 0) {
+    p <- ggplot() + 
+      annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+      theme_void()
+  } else {
+    p <- ggplot(reactive_top_categories_data(), aes(x = reorder(category, count), y = count)) +
+      geom_bar(stat = "identity", fill = "lightblue") +
+      coord_flip() +
+      labs(title = "Top 10 Categories by News Count", x = "Category", y = "Count") +
+      theme_minimal()
+  }
+  
+  ggplotly(p)
+})
+```
+
+### Average Score Over Time
+
+```{r avg_score_chart}
+reactive_avg_score_data <- reactive({
+  req(input$date_range[1], input$date_range[2])
+  
+  date_from <- input$date_range[1]
+  date_to <- input$date_range[2] + 1
+  categories <- input$categories
+  include_null_score <- input$include_null_score
+  score_min <- input$score_range[1]
+  score_max <- input$score_range[2]
+  search_title <- input$search_title
+  
+  q_avg_score_over_time(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+})
+
+renderPlotly({
+  if(nrow(reactive_avg_score_data()) == 0) {
+    p <- ggplot() + 
+      annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+      theme_void()
+  } else {
+    p <- ggplot(reactive_avg_score_data(), aes(x = day, y = avg_score)) +
+      geom_line(color = "orange", size = 1) +
+      geom_point(color = "orange", size = 2) +
+      labs(title = "Average Score Over Time", x = "Date", y = "Average Score") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  }
+  
+  ggplotly(p)
+})
+```
+
+### Score Distribution
+
+```{r score_dist_chart}
+reactive_score_dist_data <- reactive({
+  req(input$date_range[1], input$date_range[2])
+  
+  date_from <- input$date_range[1]
+  date_to <- input$date_range[2] + 1
+  categories <- input$categories
+  include_null_score <- input$include_null_score
+  score_min <- input$score_range[1]
+  score_max <- input$score_range[2]
+  search_title <- input$search_title
+  
+  q_score_distribution(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+})
+
+renderPlotly({
+  if(nrow(reactive_score_dist_data()) == 0) {
+    p <- ggplot() + 
+      annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+      theme_void()
+  } else {
+    p <- ggplot(reactive_score_dist_data(), aes(x = as.factor(score), y = count)) +
+      geom_bar(stat = "identity", fill = "green") +
+      labs(title = "Score Distribution", x = "Score", y = "Count") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  }
+  
+  ggplotly(p)
+})
+```
+
+### Heatmap: Day vs Category
+
+```{r heatmap_chart}
+reactive_heatmap_data <- reactive({
+  req(input$date_range[1], input$date_range[2])
+  
+  date_from <- input$date_range[1]
+  date_to <- input$date_range[2] + 1
+  categories <- input$categories
+  include_null_score <- input$include_null_score
+  score_min <- input$score_range[1]
+  score_max <- input$score_range[2]
+  search_title <- input$search_title
+  
+  q_heatmap_data(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+})
+
+renderPlotly({
+  if(nrow(reactive_heatmap_data()) == 0) {
+    p <- plot_ly(type = "heatmap", 
+                  z = matrix(0, nrow = 1, ncol = 1),
+                  x = c("No Data"), 
+                  y = c("Available"))
+  } else {
+    p <- plot_ly(
+      data = reactive_heatmap_data(),
+      x = ~day,
+      y = ~category,
+      z = ~count,
+      type = "heatmap",
+      colorscale = "Viridis"
+    ) %>%
+      layout(
+        title = "Heatmap: Day vs Category",
+        xaxis = list(title = "Day"),
+        yaxis = list(title = "Category")
+      )
+  }
+  
+  p
+})
+```
+
+### Hourly Distribution
+
+```{r hourly_chart}
+reactive_hourly_data <- reactive({
+  req(input$date_range[1], input$date_range[2])
+  
+  date_from <- input$date_range[1]
+  date_to <- input$date_range[2] + 1
+  categories <- input$categories
+  include_null_score <- input$include_null_score
+  score_min <- input$score_range[1]
+  score_max <- input$score_range[2]
+  search_title <- input$search_title
+  
+  q_hourly_distribution(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+})
+
+renderPlotly({
+  if(nrow(reactive_hourly_data()) == 0) {
+    p <- ggplot() + 
+      annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+      theme_void()
+  } else {
+    p <- ggplot(reactive_hourly_data(), aes(x = as.factor(hour), y = count)) +
+      geom_bar(stat = "identity", fill = "purple") +
+      labs(title = "Hourly Distribution of News", x = "Hour", y = "Count") +
+      theme_minimal()
+  }
+  
+  ggplotly(p)
+})
+```
+
+## Top News Table
+
+```{r top_news_table}
+reactive_top_news_data <- reactive({
+  req(input$date_range[1], input$date_range[2])
+  
+  date_from <- input$date_range[1]
+  date_to <- input$date_range[2] + 1
+  categories <- input$categories
+  include_null_score <- input$include_null_score
+  score_min <- input$score_range[1]
+  score_max <- input$score_range[2]
+  search_title <- input$search_title
+  
+  q_top_news(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+})
+
+output$top_news_table <- DT::renderDataTable({
+  if(nrow(reactive_top_news_data()) == 0) {
+    # Return empty table with appropriate columns
+    empty_df <- data.frame(
+      published_at = as.POSIXct(character(0)),
+      category = character(0),
+      score = integer(0),
+      title = character(0),
+      link = character(0)
+    )
+    return(DT::datatable(empty_df, options = list(pageLength = 10)))
+  }
+  
+  # Format the data for display
+  df <- reactive_top_news_data()
+  df$published_at <- format(df$published_at, "%Y-%m-%d %H:%M")
+  
+  # Make the link column clickable
+  df$link_html <- sprintf('<a href="%s" target="_blank">Link</a>', df$link)
+  
+  # Prepare the table with clickable links
+  table_data <- df[, c("published_at", "category", "score", "title", "link_html")]
+  colnames(table_data)[5] <- "link"
+  
+  DT::datatable(
+    table_data,
+    escape = FALSE,  # Allow HTML in the table
+    options = list(
+      pageLength = 10,
+      lengthMenu = list(c(10, 25, 50, -1), c(10, 25, 50, "All"))
+    ),
+    colnames = c("Published At", "Category", "Score", "Title", "Link")
+  )
+})
+
+DT::dataTableOutput("top_news_table")

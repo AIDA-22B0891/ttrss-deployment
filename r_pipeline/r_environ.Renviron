@@ -1,0 +1,15 @@
+# --- НАСТРОЙКИ TT-RSS ---
+TTRSS_URL="https://example.com/tt-rss/api/"
+TTRSS_USER="admin"
+TTRSS_PASS="super_secret_password"
+
+# --- НАСТРОЙКИ YANDEX GPT ---
+YA_FOLDER_ID="b1g..."
+YA_API_KEY="AQV..."
+
+# --- НАСТРОЙКИ БАЗЫ ДАННЫХ ---
+DB_HOST=192.168.0.4
+DB_PORT=5432
+DB_USER=gen_user
+DB_PASS=Grigoriy!654@
+DB_NAME=r_project

@@ -1,0 +1,16 @@
+# Environment variables
+.env
+
+# R files
+*.RData
+*.Rhistory
+.Rproj.user/
+.Rprofile
+
+# Docker
+Dockerfile*
+docker-compose*
+
+# Temporary files
+tmp/
+temp/
