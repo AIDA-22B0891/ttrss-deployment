@@ -6,10 +6,6 @@ services:
     container_name: ttrss_db
     env_file:
       - .env
-    environment:
-      - POSTGRES_USER=${DB_USER:-ttrss}
-      - POSTGRES_PASSWORD=${DB_PASS:-ttrss_password}
-      - POSTGRES_DB=${DB_NAME:-ttrss}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -21,13 +17,6 @@ services:
       - "8280:80"
     env_file:
       - .env
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=${DB_NAME:-ttrss}
-      - DB_USER=${DB_USER:-ttrss}
-      - DB_PASS=${DB_PASS:-ttrss_password}
-      - SELF_URL_PATH=http://localhost:8280/
     volumes:
       - feed-icons:/var/www/feed-icons
     depends_on:
@@ -39,13 +28,6 @@ services:
     container_name: ttrss_mcp
     env_file:
       - .env
-    environment:
-      - MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*
-      - MCP_ALLOWED_ORIGINS=http://localhost:*,https://localhost:*
-      - TTRSS_API_URL=http://ttrss/api/
-      - TTRSS_USER=${TTRSS_USER:-admin}
-      - TTRSS_PASSWORD=${TTRSS_PASS:-password}
-      - LOG_LEVEL=INFO
     depends_on:
       - ttrss
     ports:
@@ -57,17 +39,6 @@ services:
     container_name: r_pipeline
     env_file:
       - .env
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USER=${DB_USER:-ttrss}
-      - DB_PASS=${DB_PASS:-ttrss_password}
-      - DB_NAME=${DB_NAME:-ttrss}
-      - TTRSS_URL=http://trss/api/
-      - TTRSS_USER=${TTRSS_USER:-admin}
-      - TTRSS_PASS=${TTRSS_PASS:-password}
-      - YA_FOLDER_ID=${YA_FOLDER_ID:-your-folder-id}
-      - YA_API_KEY=${YA_API_KEY:-your-api-key}
     depends_on:
       - db
       - ttrss
@@ -80,12 +51,6 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USER=${DB_USER:-ttrss}
-      - DB_PASS=${DB_PASS:-ttrss_password}
-      - DB_NAME=${DB_NAME:-ttrss}
     depends_on:
       - db
     restart: unless-stopped
