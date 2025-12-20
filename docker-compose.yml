@@ -1,5 +1,6 @@
 version: '3.8'
 
+
 services:
   # База данных PostgreSQL для хранения обработанных новостей
   db:
@@ -19,6 +20,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
 
  # Сервер TT-RSS для получения новостей
   ttrss:
@@ -44,6 +46,7 @@ services:
     volumes:
       - ttrss_data:/var/www/feedly-data
 
+
   # Обновление TT-RSS
   ttrss-updater:
     build:
@@ -55,6 +58,7 @@ services:
       - ttrss
     environment:
       - TTRSS_URL=http://ttrss:80
+
 
   # MCP сервер для взаимодействия с TT-RSS
   mcp:
@@ -70,6 +74,7 @@ services:
     depends_on:
       - ttrss
 
+
   # Пайплайн обработки новостей
   pipeline:
     build:
@@ -84,6 +89,7 @@ services:
       - ttrss
       - mcp
 
+
   # Дашборд для визуализации
   dashboard:
     build:
@@ -97,6 +103,9 @@ services:
     depends_on:
       - db
 
+
 volumes:
   postgres_data:
   ttrss_data:
+
+
