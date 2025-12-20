@@ -724,6 +724,8 @@ ui <- fluidPage(
   )
 )
 
+
+      
 # Server
 server <- function(input, output, session) {
   # Reactive to get unique categories
