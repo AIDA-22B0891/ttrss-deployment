@@ -1,4 +1,0 @@
-mcp[cli]
-requests
-starlette
-uvicorn[standard]
