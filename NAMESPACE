@@ -10,3 +10,4 @@ export(save_article_to_db)
 export(ttrss_get_unread)
 export(ttrss_login)
 export(ttrss_mark_read)
+
