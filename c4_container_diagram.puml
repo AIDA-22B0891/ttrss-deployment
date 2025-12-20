@@ -1,0 +1,25 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма системы анализа новостей
+
+Person(user, "Пользователь", "Читает новости и анализирует контент")
+
+System_Boundary(news_system, "Система анализа новостей") {
+    Container(ttrss_app, "Tiny Tiny RSS", "PHP/MySQL", "Система управления RSS-лентами")
+    Container(db, "PostgreSQL", "Database", "Хранение статей и результатов анализа")
+    Container(r_pipeline, "R Pipeline", "R", "Обработка и анализ новостей")
+    Container(yandex_llm, "Yandex GPT", "LLM API", "Языковая модель для анализа текста")
+    Container(dashboard, "Shiny Dashboard", "R/Shiny", "Веб-панель для визуализации")
+    Container(nginx, "Nginx", "Web Server", "Обратный прокси и балансировщик нагрузки")
+}
+
+Rel(user, nginx, "Доступ к панели управления", "HTTPS")
+Rel(nginx, dashboard, "Перенаправление запросов", "HTTP")
+Rel(ttrss_app, r_pipeline, "Предоставляет новые статьи", "API/JSON")
+Rel(r_pipeline, yandex_llm, "Запросы на анализ текста", "HTTPS")
+Rel(r_pipeline, db, "Сохранение статей и результатов", "SQL")
+Rel(r_pipeline, ttrss_app, "Отметка прочитанных статей", "API")
+Rel(dashboard, db, "Чтение данных для отображения", "SQL")
+
+@enduml

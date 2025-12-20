@@ -1,0 +1,15 @@
+import contextlib
+from starlette.applications import Starlette
+from starlette.routing import Mount
+
+from server import mcp
+
+@contextlib.asynccontextmanager
+async def lifespan(app: Starlette):
+    async with mcp.session_manager.run():
+        yield
+
+app = Starlette(
+    routes=[Mount("/", app=mcp.streamable_http_app())],
+    lifespan=lifespan,
+)

@@ -1,60 +1,102 @@
 version: '3.8'
 
 services:
+  # База данных PostgreSQL для хранения обработанных новостей
   db:
-    image: postgres:13-alpine
-    container_name: ttrss_db
-    env_file:
-      - .env
+    image: postgres:15
+    container_name: news_db
+    environment:
+      POSTGRES_DB: news_analysis
+      POSTGRES_USER: news_user
+      POSTGRES_PASSWORD: news_pass
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+      - ./database-schema/full_schema.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U news_user -d news_analysis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+ # Сервер TT-RSS для получения новостей
   ttrss:
-    image: wangqiru/ttrss:latest
+    image: crazymax/tt-rss:latest
     container_name: ttrss_app
+    environment:
+      - SELF_URL_PATH=http://localhost:8280
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=news_analysis
+      - DB_USER=news_user
+      - DB_PASS=news_pass
+      - TTRSS_DB_HOST=db
+      - TTRSS_DB_PORT=5432
+      - TTRSS_DB_NAME=news_analysis
+      - TTRSS_DB_USER=news_user
+      - TTRSS_DB_PASS=news_pass
     ports:
       - "8280:80"
-    env_file:
-      - .env
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - feed-icons:/var/www/feed-icons
-    depends_on:
-      - db
-    restart: unless-stopped
+      - ttrss_data:/var/www/feedly-data
 
+  # Обновление TT-RSS
+  ttrss-updater:
+    build:
+      dockerfile: Dockerfile.ttrss-update
+    container_name: ttrss_updater
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - ttrss
+    environment:
+      - TTRSS_URL=http://ttrss:80
+
+  # MCP сервер для взаимодействия с TT-RSS
   mcp:
-    build: ./mcp
-    container_name: ttrss_mcp
-    env_file:
-      - .env
-    depends_on:
-      - ttrss
-    ports:
-      - "9100:8000"
-    restart: unless-stopped
-
-  r_pipeline:
-    build: ./r_pipeline
-    container_name: r_pipeline
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - ttrss
-    restart: unless-stopped
-
-  quatro_dash:
-    build: ./quatro_dash
-    container_name: quatro_dash
+    build:
+      dockerfile: mcp/Dockerfile.txt
+    container_name: mcp_server
+    environment:
+      - TTRSS_API_URL=http://ttrss:80/api/
+      - TTRSS_USER=admin
+      - TTRSS_PASSWORD=password
     ports:
       - "8000:8000"
+    depends_on:
+      - ttrss
+
+  # Пайплайн обработки новостей
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news_pipeline
     env_file:
       - .env
+    command: ["Rscript", "/pipeline_runner.R"]
     depends_on:
       - db
-    restart: unless-stopped
+      - ttrss
+      - mcp
+
+  # Дашборд для визуализации
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news_dashboard
+    env_file:
+      - .env
+    ports:
+      - "3838:3838"
+    depends_on:
+      - db
 
 volumes:
   postgres_data:
-  feed-icons:
+  ttrss_data:
