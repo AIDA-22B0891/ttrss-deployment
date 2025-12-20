@@ -1,16 +1,83 @@
-# Environment variables
-.env
-
-# R files
+# R
 *.RData
 *.Rhistory
+*.Rproj.user/
 .Rproj.user/
-.Rprofile
+.Rprofile.swp
+.Ruserdata/
+*.utf8.md
+*.knit.md
+*_cache/
+.cache/
 
 # Docker
-Dockerfile*
-docker-compose*
+Dockerfile
+.dockerignore
+docker-compose.yml
+*.dockerapp
+
+# Environment variables
+.env
+.r_environ.Renviron
+Renviron.local
+.Renviron
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
 
 # Temporary files
 tmp/
 temp/
+*.tmp
+*.temp
+
+# Log files
+*.log
+logs/
+
+# Packages
+inst/lib/
+packrat/lib/
+packrat/src/
+renv/library/
+renv/activate.R
+renv/settings.json
+.dcf
+
+# Shiny
+shiny_temp/
+
+# RMarkdown
+docs/
+results/
+
+# Other common R package folders
+lib/
+library/
+libs/
+bin/
+include/
+share/
+src/
+tests/
+
+# User-specific settings
+.Rbuildignore
+
+# Игнорировать данные и результаты
+*.csv
+*.xlsx
+*.rds
+
+# Игнорировать временные скрипты отладки
+debug_*.R
+test_db.R
+# Если full_test.R тебе нужен для истории - оставь, если нет - добавь сюда:
+# full_test.R

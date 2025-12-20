@@ -1,0 +1,24 @@
+Package: NewsHarvestR
+Title: ETL Pipeline for TT-RSS and YandexGPT
+Version: 0.1.0
+Authors@R: person("Artem", "Frank", email = "artem23mnd@yandex.ru", role = c("aut", "cre"))
+Description: Пакет для автоматического сбора новостей из TT-RSS, их очистки, 
+    классификации через YandexGPT и сохранения в PostgreSQL.
+License: MIT
+Encoding: UTF-8
+LazyData: true
+Imports: 
+    httr2,
+    jsonlite,
+    rvest,
+    stringr,
+    xml2,
+    DBI,
+    RPostgres,
+    dplyr,
+    purrr,
+    quarto,
+    plotly,
+    DT,
+    shiny
+RoxygenNote: 7.3.3

@@ -1,0 +1,107 @@
+---
+title: "Аналитический дашборд новостей"
+format: 
+  html:
+    theme: cosmo
+    toc: true
+    toc-location: left
+    code-fold: false
+server: shiny
+---
+
+```{r setup, include=FALSE}
+library(shiny)
+library(DBI)
+library(RPostgres)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(DT)
+
+# Загрузка переменных окружения
+if(file.exists(".env")) {
+  readRenviron(".env")
+}
+
+# Подключение к базе данных
+# Используем общую функцию из пакета
+con <- NewsHarvestR::connect_to_db()
+```
+
+## Обзор данных
+
+```{r connection}
+# Устанавливаем соединение с базой данных
+con <- NewsHarvestR::connect_to_db()
+
+# Загружаем данные из таблицы news_analysis
+news_data <- DBI::dbGetQuery(con, "SELECT * FROM news_analysis ORDER BY created_at DESC LIMIT 1000")
+
+# Закрываем соединение
+DBI::dbDisconnect(con)
+
+# Показываем общую информацию о данных
+cat("Всего записей в базе:", nrow(news_data), "\n")
+cat("Период данных:", min(news_data$published_at), "до", max(news_data$published_at), "\n")
+```
+
+## Категории новостей
+
+```{r categories}
+# Подсчет количества новостей по категориям
+category_counts <- news_data %>%
+  count(category, sort = TRUE) %>%
+ head(10)
+
+# Визуализация
+p1 <- ggplot(category_counts, aes(x = reorder(category, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Топ-10 категорий новостей", x = "Категория", y = "Количество") +
+  theme_minimal()
+
+ggplotly(p1)
+```
+
+## Временная динамика
+
+```{r timeline}
+# Группировка по дате публикации
+news_data$date <- as.Date(news_data$published_at)
+daily_counts <- news_data %>%
+ count(date) %>%
+  arrange(date)
+
+# Визуализация
+p2 <- ggplot(daily_counts, aes(x = date, y = n)) +
+  geom_line(color = "steelblue", size = 1) +
+  labs(title = "Количество новостей по датам", x = "Дата", y = "Количество") +
+  theme_minimal() +
+  scale_x_date(date_breaks = "1 week", date_labels = "%d %b")
+
+ggplotly(p2)
+```
+
+## Оценка релевантности
+
+```{r scores}
+# Распределение оценок релевантности
+p3 <- ggplot(news_data, aes(x = score)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Распределение оценок релевантности", x = "Оценка", y = "Количество") +
+  theme_minimal()
+
+ggplotly(p3)
+```
+
+## Таблица последних новостей
+
+```{r table}
+# Таблица с последними новостями
+DT::datatable(news_data[, c("title", "category", "summary", "score", "published_at")], 
+              options = list(pageLength = 10, scrollX = TRUE),
+              colnames = c("Заголовок" = "title", 
+                          "Категория" = "category", 
+                          "Суммаризация" = "summary", 
+                          "Оценка" = "score", 
+                          "Дата публикации" = "published_at"))
