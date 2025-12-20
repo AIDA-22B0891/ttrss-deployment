@@ -233,6 +233,24 @@ curl -s -N \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_active_functions","arguments":{}}}'
 ```
 
+### 3) tools/call (пример: search)
+```bash
+root@6207783-qt34447:/opt/ttrss# curl -s -N \
+  -X POST http://127.0.0.1:9100/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: 5010f5ef7e854181889cb4743d71751e" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":10,
+    "method":"tools/call",
+    "params":{
+      "name":"search",
+      "arguments":{"query":"habr","limit":5}
+    }
+  }'
+```
+
 ---
 
 ## Типовые проблемы
@@ -252,5 +270,16 @@ curl -s -N \
 Причина: не передали или неправильно передали **MCP session id** в заголовке `Mcp-Session-Id`.
 Решение: сначала выполнить `initialize`, взять `mcp-session-id` из заголовка и подставить его в следующие запросы.
 
+---
+
+Также закрепляю удобный способ получения ttrss session_id
+```bash
+SID=$(curl -s -X POST http://194.87.118.106/api/ \
+  -H "Content-Type: application/json" \
+  -d '{"op":"login","user":"admin","password":"password"}' | \
+  python3 -c 'import sys,json; print(json.load(sys.stdin)["content"]["session_id"])')
+
+echo "$SID"
+```
 ---
 
