@@ -123,51 +123,140 @@ NewsHarvestR — это комплексное программное решен
 - **Пайплайн на R**: Ядро системы, развернутое в среде R. Выполняет роль оркестратора и процессора данных.
 - **Дашборд на Shiny**: Легковесное веб-приложение, подключенное к аналитической БД для визуализации.
 - **MCP сервер**: Опциональный компонент, предоставляющий API TT-RSS как инструмент для LLM через стандартный протокол.
+  
+### Подробная структуры базы даннхы TT-RSS
+
+Основное хранилище данных системы TT-RSS организовано в несколько ключевых таблиц внутри базы данных PostgreSQL. Это сложная схема, которая поддерживает все функции агрегатора: пользователей, ленты, статьи, настройки, фильтры и теги. Ваш ETL-пайплайн взаимодействует с этой схемой через API, но понимание её глубины важно для дальнейшей интеграции или расширения системы. В соответствии с лучшими практиками PostgreSQL, все таблицы расположены в схеме по умолчанию public. Далее распианы сами таблицы, их назначение и связи с другими таблицами:
+Таблица	Назначение	Связи с другими таблицами
+
+- ttrss_feeds: Ядро системы. Хранит все RSS-ленты, на которые подписан пользователь или система. Содержит настройки обновления (update_interval), URL, название и связь с категориями (cat_id). Связана с ttrss_feed_categories (категории), ttrss_user_entries (статьи пользователя).
+- ttrss_entries: Центральное хранилище контента. Содержит все статьи, полученные со всех RSS-лент. У каждой записи есть уникальный guid, заголовок (title), ссылка (link), контент (content), дата публикации (updated) и автор (author). Это таблица общего пула статей. Её id ссылается на ttrss_user_entries.ref_id. Это позволяет разделять один и тот же текст статьи между разными пользователями.
+- ttrss_user_entries: Связующее звено между пользователем и статьей. Отслеживает состояние статьи для конкретного пользователя: прочитана ли она (unread), помечена (marked), оценка (score). Поле ref_id ссылается на общую статью в ttrss_entries, а feed_id — на её источник. Ключевая таблица для API. Запрос getHeadlines возвращает данные на основе связи ref_id и состояния unread.
+- ttrss_users: Учетные записи. Содержит логины, хэши паролей, email и уровень доступа пользователей системы. Практически все таблицы (ttrss_feeds, ttrss_user_entries, ttrss_filters2) имеют внешний ключ owner_uid к этой таблице.
+- ttrss_feed_categories: Иерархия категорий лент. Позволяет пользователю организовывать свои подписки в папки. Поддерживает вложенность через parent_cat. Связана с ttrss_feeds.cat_id.
 
 ### Важное замечание об архитектуре
 
 **База данных с проанализированными новостями изолирована и находится на отдельном инстансе.** Это обеспечивает:
 
-- Повышенную безопасность данных
-- Независимость от основной инфраструктуры TT-RSS
-- Возможность масштабирования и резервного копирования
-- Разделение зон ответственности между системами
+- Повышенную безопасность: Компрометация аналитической панели не затрагивает основную систему агрегации новостей.
+- Независимость и стабильность: Работа ресурсоемкого ETL-пайплайна, логика анализа и обновления схемы данных не влияют на стабильность и скорость работы RSS-агрегатора.
+- Удобство администрирования: Целевую базу данных можно резервировать, масштабировать и оптимизировать под аналитические запросы независимо от инфраструктуры источника данных.
+- Четкое разделение ответственности: TT-RSS отвечает только за сбор и первичное хранение новостей, а NewsHarvestR — за их интеллектуальный анализ, обогащение и хранение результатов в собственной, оптимизированной для анализа схеме.
 
 ### Схема взаимодействия компонентов
 ![](./images/arch.png)
 
-### Структура базы данных
+#### Пример структуры таблицы
 
-#### Таблица `news_analysis`
+Далее указаны поля, тип данных, подробное описание и названение, а также ограничения и особенности.
+- id: SERIALАвтоинкрементный первичный ключ. Технический уникальный идентификатор записи в рамках нашей аналитической базы. Значение генерируется автоматически при вставке новой строки и гарантирует целостность и порядок записей. PRIMARY KEY
+- news_id: TEXT, Уникальный глобальный идентификатор новости из TT-RSS. Это ключевое поле для обеспечения идемпотентности пайплайна. Оно предотвращает дублирование одной и той же новости в таблице, даже если она была повторно получена из источника. UNIQUE, NOT NULL
+- title: TEXT, Оригинальный заголовок статьи, полученный из RSS-ленты. Хранится в исходном виде, что позволяет проводить точный поиск и верификацию.	
+- link: TEXT, Прямая URL-ссылка на оригинальную публикацию. Позволяет пользователю или системе быстро перейти к первоисточнику для получения полной информации.	
+- published_at: TIMESTAMP, Дата и время публикации новости в её оригинальном источнике. Критически важное поле для анализа временных трендов, построения графиков публикационной активности и фильтрации новостей по периоду.	INDEX (рекомендуется)
+- category: TEXT, Семантическая категория, присвоенная нейросетью YandexGPT. Это результат интеллектуальной классификации (например, "Кибербезопасность", "Запуск ракеты", "Экономика"). Позволяет автоматически группировать и структурировать разнородный новостной поток.	
+- summary: TEXT, Краткое, содержательное изложение сути статьи, сгенерированное YandexGPT в ходе процесса автоматической суммаризации. Позволяет мгновенно уловить основную мысль, не читая полный текст.	
+- score:	INTEGER, Оценка релевантности и важности новости для IT-аудитории, вычисленная YandexGPT. Представляет собой числовое значение в диапазоне от 1 до 10, где 10 — максимальная важность. Это ключевой показатель для приоритизации и ранжирования материалов в дашборде. CHECK (score >= 1 AND score <= 10)
+- created_at: TIMESTAMP, Метка времени создания записи в нашей аналитической базе. Автоматически фиксирует момент, когда новость прошла полный цикл ETL (извлечение, трансформация, загрузка). Важно для аудита работы системы и анализа её производительности. DEFAULT CURRENT_TIMESTAMP
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `id` | SERIAL | Уникальный идентификатор записи (первичный ключ) |
-| `news_id` | TEXT | Уникальный идентификатор новости из TT-RSS |
-| `title` | TEXT | Заголовок новости |
-| `link` | TEXT | Ссылка на новость |
-| `published_at` | TIMESTAMP | Дата публикации новости |
-| `category` | TEXT | Категория новости, определенная с помощью ИИ |
-| `summary` | TEXT | Краткое содержание новости, сгенерированное с помощью ИИ |
-| `score` | INTEGER | Оценка релевантности новости, определенная с помощью ИИ |
-| `created_at` | TIMESTAMP | Дата и время создания записи в базе данных (автоматически заполняется текущим временем) |
+### Общая схема данных
 
-#### Диаграмма структуры таблицы
+Для полноты документации и демонстрации реальной инсталляции ниже приведен фрагмент SQL-кода (DDL - Data Definition Language), который определяет структуру некоторых ключевых таблиц. Этот код автоматически генерируется при развертывании системы и находится в репозитории проекта (database-schema/full_schema.sql).
 
 ```
-+-------------------+-------------------+------------------+
-|      Поле         |       Тип         |    Описание      |
-+-------------------+-------------------+------------------+
-| id                | SERIAL            | Первичный ключ   |
-| news_id           | TEXT (UNIQUE)     | ID новости TT-RSS|
-| title             | TEXT              | Заголовок        |
-| link              | TEXT              | Ссылка на новость|
-| published_at      | TIMESTAMP         | Дата публикации  |
-| category          | TEXT              | Категория (ИИ)   |
-| summary           | TEXT              | Суммаризация (ИИ)|
-| score             | INTEGER           | Оценка (ИИ)      |
-| created_at        | TIMESTAMP         | Дата создания    |
-+-------------------+-------------------+------------------+
+--
+-- Name: ttrss_entries; Type: TABLE; Schema: public;
+--
+
+CREATE TABLE public.ttrss_entries (
+    id integer NOT NULL,
+    title text NOT NULL,
+    guid text NOT NULL,
+    link text NOT NULL,
+    updated timestamp without time zone NOT NULL,
+    content text NOT NULL,
+    content_hash character varying(250) NOT NULL,
+    cached_content text,
+    no_orig_date boolean DEFAULT false NOT NULL,
+    date_entered timestamp without time zone NOT NULL,
+    date_updated timestamp without time zone NOT NULL,
+    num_comments integer DEFAULT 0 NOT NULL,
+    comments character varying(250) DEFAULT ''::character varying NOT NULL,
+    plugin_data text,
+    tsvector_combined tsvector,
+    lang character varying(2),
+    author character varying(250) DEFAULT ''::character varying NOT NULL
+);
+
+--
+-- Name: ttrss_user_entries; Type: TABLE; Schema: public;
+--
+
+CREATE TABLE public.ttrss_user_entries (
+    int_id integer NOT NULL,
+    ref_id integer NOT NULL,
+    uuid character varying(200) NOT NULL,
+    feed_id integer,
+    orig_feed_id integer,
+    owner_uid integer NOT NULL,
+    marked boolean DEFAULT false NOT NULL,
+    published boolean DEFAULT false NOT NULL,
+    tag_cache text NOT NULL,
+    label_cache text NOT NULL,
+    last_read timestamp without time zone,
+    score integer DEFAULT 0 NOT NULL,
+    last_marked timestamp without time zone,
+    last_published timestamp without time zone,
+    note text,
+    unread boolean DEFAULT true NOT NULL
+);
+
+--
+-- Name: ttrss_feeds; Type: TABLE; Schema: public;
+--
+
+CREATE TABLE public.ttrss_feeds (
+    id integer NOT NULL,
+    owner_uid integer NOT NULL,
+    title character varying(200) NOT NULL,
+    cat_id integer,
+    feed_url text NOT NULL,
+    icon_url character varying(250) DEFAULT ''::character varying NOT NULL,
+    update_interval integer DEFAULT 0 NOT NULL,
+    purge_interval integer DEFAULT 0 NOT NULL,
+    last_updated timestamp without time zone,
+    last_unconditional timestamp without time zone,
+    last_error text DEFAULT ''::text NOT NULL,
+    last_modified text DEFAULT ''::text NOT NULL,
+    favicon_avg_color character varying(11) DEFAULT NULL::character varying,
+    favicon_is_custom boolean,
+    site_url character varying(250) DEFAULT ''::character varying NOT NULL,
+    auth_login character varying(250) DEFAULT ''::character varying NOT NULL,
+    parent_feed integer,
+    private boolean DEFAULT false NOT NULL,
+    auth_pass text DEFAULT ''::text NOT NULL,
+    hidden boolean DEFAULT false NOT NULL,
+    include_in_digest boolean DEFAULT true NOT NULL,
+    rtl_content boolean DEFAULT false NOT NULL,
+    cache_images boolean DEFAULT false NOT NULL,
+    hide_images boolean DEFAULT false NOT NULL,
+    cache_content boolean DEFAULT false NOT NULL,
+    last_viewed timestamp without time zone,
+    last_update_started timestamp without time zone,
+    last_successful_update timestamp without time zone,
+    update_method integer DEFAULT 0 NOT NULL,
+    always_display_enclosures boolean DEFAULT false NOT NULL,
+    order_id integer DEFAULT 0 NOT NULL,
+    mark_unread_on_update boolean DEFAULT false NOT NULL,
+    update_on_checksum_change boolean DEFAULT false NOT NULL,
+    strip_images boolean DEFAULT false NOT NULL,
+    view_settings character varying(250) DEFAULT ''::character varying NOT NULL,
+    pubsub_state integer DEFAULT 0 NOT NULL,
+    favicon_last_checked timestamp without time zone,
+    feed_language character varying(100) DEFAULT ''::character varying NOT NULL,
+    auth_pass_encrypted boolean DEFAULT false NOT NULL
+);
 ```
 
 ### Безопасность и надежность
