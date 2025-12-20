@@ -136,5 +136,121 @@ curl -X POST http://194.87.118.106/api/ \
 ```
 
 # На данном этапе настройка и тестирование связностей с Docker завершается
+---
 
+## MCP server (TT-RSS API wrapper)
+
+В репозитории есть MCP-сервер, который предоставляет доступ к TT-RSS JSON API через Model Context Protocol (MCP).
+
+### Что умеет
+
+MCP поднимает 3 tool’а:
+
+* `get_active_functions` — список доступных функций MCP и текущие дефолты конфигурации
+* `get_login` — логин в TT-RSS API (op=`login`) и получение `sid` (TT-RSS session id)
+* `search` — поиск по статьям (использует TT-RSS API, обычно через `getHeadlines` + `search=...`)
+
+### Важно: два разных session id
+
+В системе есть **два независимых идентификатора сессии**:
+
+1. **MCP session id** (заголовок `mcp-session-id`)
+   Возвращается в HTTP-ответе MCP на запрос `initialize`. Его нужно передавать в заголовке `Mcp-Session-Id` для дальнейших MCP-вызовов (`tools/list`, `tools/call`).
+
+2. **TT-RSS sid** (поле `content.session_id` в ответе `op=login`)
+   Используется внутри TT-RSS API и передаётся **в теле JSON** как `"sid": "..."` для `getFeeds/getHeadlines/...`.
+
+Не путать. Ошибка вида `Bad Request: No valid session ID provided` почти всегда означает, что в `Mcp-Session-Id` передали не MCP session id.
+
+---
+
+## Запуск через docker-compose
+
+MCP запускается отдельным контейнером и ходит в TT-RSS API внутри docker-сети.
+
+Запуск:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail 100 mcp
+```
+
+Endpoint MCP:
+
+* `http://<HOST>:9100/mcp`
+
+---
+
+## Проверка работоспособности MCP (curl)
+
+### 1) initialize (получить MCP session id)
+
+```bash
+curl -i -N \
+  -X POST http://127.0.0.1:9100/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"initialize",
+    "params":{
+      "protocolVersion":"2025-06-18",
+      "capabilities":{},
+      "clientInfo":{"name":"curl","version":"0"}
+    }
+  }'
+```
+
+В ответе будет заголовок:
+
+```
+mcp-session-id: <SESSION_ID>
+```
+
+### 2) tools/list (нужно передать MCP session id)
+
+```bash
+curl -i -N \
+  -X POST http://127.0.0.1:9100/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <SESSION_ID>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+Ожидается список tools (`get_active_functions`, `get_login`, `search`).
+
+### 3) tools/call (пример: get_active_functions)
+
+```bash
+curl -s -N \
+  -X POST http://127.0.0.1:9100/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <SESSION_ID>" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_active_functions","arguments":{}}}'
+```
+
+---
+
+## Типовые проблемы
+
+### 1) `Invalid Host header` / `421 Misdirected Request`
+
+Причина: защита MCP от DNS rebinding режет запросы с “неразрешённым” `Host`.
+Решение: добавить публичный IP/домен в `MCP_ALLOWED_HOSTS` и `MCP_ALLOWED_ORIGINS` (см. docker-compose пример выше).
+
+### 2) `406 Not Acceptable: Client must accept text/event-stream`
+
+Причина: запрос к `/mcp` без корректного `Accept`.
+Решение: для POST использовать `Accept: application/json, text/event-stream` (см. примеры выше).
+
+### 3) `Bad Request: No valid session ID provided`
+
+Причина: не передали или неправильно передали **MCP session id** в заголовке `Mcp-Session-Id`.
+Решение: сначала выполнить `initialize`, взять `mcp-session-id` из заголовка и подставить его в следующие запросы.
+
+---
 
