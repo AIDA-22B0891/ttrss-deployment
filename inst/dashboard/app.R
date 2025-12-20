@@ -757,7 +757,147 @@ server <- function(input, output, session) {
     })
   })
   
+  # Reactive data for KPIs
+  reactive_kpi_data <- reactive({
+    req(input$date_range[1], input$date_range[2])
+    
+    date_from <- input$date_range[1]
+    date_to <- input$date_range[2] + 1
+    categories <- input$categories
+    include_null_score <- input$include_null_score
+    score_min <- input$score_range[1]
+    score_max <- input$score_range[2]
+    search_title <- input$search_title
+    
+    q_kpi(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+  })
   
+  # Render KPIs
+  output$total_news_kpi <- renderText({
+    if(nrow(reactive_kpi_data()) > 0) {
+      reactive_kpi_data()$total_news
+    } else {
+      "N/A"
+    }
+  })
+  
+  output$avg_score_kpi <- renderText({
+    if(nrow(reactive_kpi_data()) > 0) {
+      round(reactive_kpi_data()$avg_score, 2)
+    } else {
+      "N/A"
+    }
+  })
+  
+  output$top_category_kpi <- renderText({
+    if(nrow(reactive_kpi_data()) > 0) {
+      reactive_kpi_data()$top_category
+    } else {
+      "N/A"
+    }
+  })
+  
+  output$last_published_kpi <- renderText({
+    if(nrow(reactive_kpi_data()) > 0) {
+      format(reactive_kpi_data()$last_published, "%Y-%m-%d %H:%M")
+    } else {
+      "N/A"
+    }
+  })
+  
+  # Reactive data for time series chart
+  reactive_timeseries_data <- reactive({
+    req(input$date_range[1], input$date_range[2])
+    
+    date_from <- input$date_range[1]
+    date_to <- input$date_range[2] + 1
+    categories <- input$categories
+    include_null_score <- input$include_null_score
+    score_min <- input$score_range[1]
+    score_max <- input$score_range[2]
+    search_title <- input$search_title
+    
+    q_timeseries(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+  })
+  
+  output$time_series_chart <- renderPlotly({
+    if(nrow(reactive_timeseries_data()) == 0) {
+      p <- ggplot() + 
+        annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+        theme_void()
+    } else {
+      p <- ggplot(reactive_timeseries_data(), aes(x = day, y = count)) +
+        geom_line(color = "steelblue", size = 1) +
+        geom_point(color = "steelblue", size = 2) +
+        labs(title = "News Count by Day", x = "Date", y = "Count") +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    }
+    
+    ggplotly(p)
+  })
+  
+  # Reactive data for top categories chart
+  reactive_top_categories_data <- reactive({
+    req(input$date_range[1], input$date_range[2])
+    
+    date_from <- input$date_range[1]
+    date_to <- input$date_range[2] + 1
+    categories <- input$categories
+    include_null_score <- input$include_null_score
+    score_min <- input$score_range[1]
+    score_max <- input$score_range[2]
+    search_title <- input$search_title
+    
+    q_top_categories(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+ })
+  
+  output$top_categories_chart <- renderPlotly({
+    if(nrow(reactive_top_categories_data()) == 0) {
+      p <- ggplot() + 
+        annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+        theme_void()
+    } else {
+      p <- ggplot(reactive_top_categories_data(), aes(x = reorder(category, count), y = count)) +
+        geom_bar(stat = "identity", fill = "lightblue") +
+        coord_flip() +
+        labs(title = "Top 10 Categories by News Count", x = "Category", y = "Count") +
+        theme_minimal()
+    }
+    
+    ggplotly(p)
+  })
+  
+  # Reactive data for avg score chart
+  reactive_avg_score_data <- reactive({
+    req(input$date_range[1], input$date_range[2])
+    
+    date_from <- input$date_range[1]
+    date_to <- input$date_range[2] + 1
+    categories <- input$categories
+    include_null_score <- input$include_null_score
+    score_min <- input$score_range[1]
+    score_max <- input$score_range[2]
+    search_title <- input$search_title
+    
+    q_avg_score_over_time(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title)
+ })
+  
+  output$avg_score_chart <- renderPlotly({
+    if(nrow(reactive_avg_score_data()) == 0) {
+      p <- ggplot() + annotate("text", x = 1, y = 1, label = "No data available", size = 8) +
+        theme_void()
+    } else {
+      p <- ggplot(reactive_avg_score_data(), aes(x = day, y = avg_score)) +
+        geom_line(color = "orange", size = 1) +
+        geom_point(color = "orange", size = 2) +
+        labs(title = "Average Score Over Time", x = "Date", y = "Average Score") +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    }
+    
+  ggplotly(p)
+})
   
   # Reactive data for score distribution chart
   reactive_score_dist_data <- reactive({
