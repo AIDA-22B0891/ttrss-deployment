@@ -61,18 +61,18 @@ services:
 
 
   # MCP сервер для взаимодействия с TT-RSS
-  mcp:
-    build:
-      dockerfile: mcp/Dockerfile.txt
-    container_name: mcp_server
-    environment:
-      - TTRSS_API_URL=http://ttrss:80/api/
-      - TTRSS_USER=admin
-      - TTRSS_PASSWORD=password
-    ports:
-      - "8000:8000"
-    depends_on:
-      - ttrss
+  mcp: 
+    build: 
+      dockerfile: mcp/Dockerfile.txt 
+    container_name: mcp_server 
+    environment: 
+      - TTRSS_API_URL=http://ttrss:80/api/ 
+      - TTRSS_USER=admin 
+      - TTRSS_PASSWORD=password 
+    ports: 
+      - "8000:8000" 
+    depends_on: 
+      - ttrss 
 
 
   # Пайплайн обработки новостей
