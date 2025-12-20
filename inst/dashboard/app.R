@@ -480,65 +480,7 @@ q_heatmap_data <- function(con, date_from, date_to, categories, include_null_sco
   return(result)
 }
 
-q_hourly_distribution <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
-  if (is.null(con)) {
-    # Return mock data if no connection
-    return(data.frame(
-      hour = 0:23,
-      count = sample(5:15, 24)
-    ))
-  }
-  
-  sql <- "
-    SELECT 
-      EXTRACT(HOUR FROM published_at) as hour,
-      COUNT(*) as count
-    FROM news_analysis
-    WHERE published_at >= $1 AND published_at < $2
-    GROUP BY EXTRACT(HOUR FROM published_at)
-    ORDER BY hour"
-  
-  params <- list(date_from, date_to)
-  
-  if(length(categories) > 0 && !is.null(categories) && categories[1] != "") {
-    sql <- gsub("GROUP BY", "AND category = ANY($3) GROUP BY", sql)
-    params <- append(params, list(categories))
-  }
-  
-  if(include_null_score) {
-    if(!is.null(score_min) && !is.null(score_max)) {
-      sql <- gsub("GROUP BY", paste("AND (score BETWEEN $4 AND $5 OR score IS NULL) GROUP BY"), sql)
-      params <- append(params, list(score_min, score_max))
-    }
-  } else {
-    if(!is.null(score_min) && !is.null(score_max)) {
-      sql <- gsub("GROUP BY", paste("AND score BETWEEN $4 AND $5 GROUP BY"), sql)
-      params <- append(params, list(score_min, score_max))
-    }
-  }
-  
-  if(search_title != "") {
-    sql <- gsub("GROUP BY", paste("AND title ILIKE $6 GROUP BY"), sql)
-    params <- append(params, list(paste("%", search_title, "%", sep="")))
-  }
-  
-  result <- tryCatch({
-    dbGetQuery(con, sql, params)
-  }, error = function(e) {
-    warning("Error in q_hourly_distribution query: ", e$message)
-    # Return mock data in case of error
-    data.frame(
-      hour = 0:23,
-      count = rep(0, 24)
-    )
-  })
-  
-  # Ensure all hours 0-23 are represented
-  all_hours <- data.frame(hour = 0:23)
-  result <- merge(all_hours, result, by = "hour", all.x = TRUE)
-  result$count[is.na(result$count)] <- 0
-  return(result)
-}
+
 
 q_top_news <- function(con, date_from, date_to, categories, include_null_score, score_min, score_max, search_title) {
   if (is.null(con)) {
